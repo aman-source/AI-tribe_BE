@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import HTTPException, status
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import get_settings
+
+logger = logging.getLogger("app.ai_agent")
 
 SCHEMA_SUMMARY = """
 You can only query a single Postgres table named tasks with the following columns and types:
@@ -39,21 +44,47 @@ def _validate_sql(sql: str) -> str:
     lowered = stmt.lower()
     forbidden = ["insert", "update", "delete", "drop", "alter", "create", "truncate"]
     if not lowered.startswith("select"):
+        logger.warning("Blocked AI SQL that did not start with SELECT.")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Generated SQL must be a SELECT statement.",
         )
     if any(word in lowered for word in forbidden):
+        logger.warning("Blocked AI SQL containing forbidden keyword.", extra={"sql": stmt})
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Query contains forbidden keywords.",
         )
     if " tasks" not in lowered:
+        logger.warning("Blocked AI SQL that does not target tasks table.", extra={"sql": stmt})
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Query must target the tasks table.",
         )
     return stmt
+
+
+def _strip_code_fence(content: str) -> str:
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?", "", stripped, count=1).strip()
+        stripped = re.sub(r"```$", "", stripped, count=1).strip()
+    return stripped
+
+
+def _extract_sql_from_content(content: str) -> str:
+    cleaned = _strip_code_fence(content)
+    payload: dict[str, Any]
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Model response is not valid JSON.") from exc
+
+    try:
+        sql = payload["sql"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("Model response missing 'sql' field.") from exc
+    return sql
 
 
 @dataclass
@@ -82,33 +113,52 @@ class TaskAIAgent:
             'Respond with JSON: {"sql": "SELECT ..."}'
         )
 
-        completion = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question},
-            ],
-            temperature=0,
-        )
-        content = completion.choices[0].message.content
+        try:
+            completion = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": question},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+        except OpenAIError as exc:
+            logger.exception("OpenAI chat completion failed.", extra={"question": question})
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="AI provider is unavailable. Retry shortly.",
+            ) from exc
+
+        content = completion.choices[0].message.content or ""
 
         try:
-            payload = json.loads(content)
-            sql = payload["sql"]
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            sql = _extract_sql_from_content(content)
+        except ValueError as exc:
+            logger.exception(
+                "Unable to parse OpenAI response.",
+                extra={"question": question, "content_sample": content[:500]},
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Unable to parse model response.",
             ) from exc
 
-        return _validate_sql(sql)
+        validated_sql = _validate_sql(sql)
+        logger.info(
+            "Generated SQL from AI question.",
+            extra={"question": question, "sql": validated_sql},
+        )
+        return validated_sql
 
     async def run_query(self, session: AsyncSession, sql: str) -> list[dict]:
         result = await session.execute(text(sql))
         rows = [dict(row._mapping) for row in result.fetchall()]
+        logger.info("Executed AI SQL query.", extra={"sql": sql, "row_count": len(rows)})
         return rows
 
     async def answer(self, session: AsyncSession, question: str) -> AIQueryResult:
+        logger.info("Received AI question.", extra={"question": question})
         sql = await self.build_sql(question)
         rows = await self.run_query(session, sql)
         return AIQueryResult(sql=sql, rows=rows)

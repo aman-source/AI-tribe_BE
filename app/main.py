@@ -1,5 +1,8 @@
 """Entry point for the FastAPI application."""
 
+import logging
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,7 +12,12 @@ from .models import HealthCheck
 from .routers.analytics import router as analytics_router
 from .routers.ai import router as ai_router
 from .routers.tasks import router as tasks_router
-from fastapi.middleware.cors import CORSMiddleware
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 app = FastAPI(
     title="Tasks API",
