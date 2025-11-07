@@ -19,25 +19,43 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
+
+def _allowed_origins() -> list[str]:
+    """Return origins from env (comma separated) or defaults."""
+
+    raw = os.getenv("ALLOWED_ORIGINS")
+    if raw:
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return [
+        "http://localhost:8081",  # local dev frontend
+        "https://ai-tribe-hackathon2025-ovw3-csvwrs3lc-amans-projects-31c68103.vercel.app",  # deployed frontend
+    ]
+
+
 app = FastAPI(
     title="Tasks API",
     version="0.2.0",
     description="Neon-backed backend service powering the Pulsevo dashboard.",
 )
 
-origins = [
-    "http://localhost:8081",          # your local dev frontend
-    "https://ai-tribe-fe.vercel.app", # your deployed frontend (replace if name differs)
-]
+allowed_origins = _allowed_origins()
+allow_all = "*" in allowed_origins
 
 # Allow the UI (likely a separate frontend) to hit the API without CORS issues.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"] if allow_all else allowed_origins,
+    allow_credentials=not allow_all,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if allow_all:
+    logging.warning(
+        "CORS configured to allow all origins without credentials; set ALLOWED_ORIGINS to tighten."
+    )
+else:
+    logging.info("CORS enabled for origins: %s", allowed_origins)
 
 app.include_router(tasks_router)
 app.include_router(analytics_router)
