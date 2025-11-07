@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "AI-tribe-Hackathon2025",
+			"path": ".."
+		},
+		{
+			"name": "Backend",
+			"path": "../../../AI-Tribe/AI-tribe-Hackathon2025/Backend"
+		}
+	],
+	"settings": {}
+}
