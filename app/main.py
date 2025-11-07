@@ -16,10 +16,15 @@ app = FastAPI(
     description="Neon-backed backend service powering the Pulsevo dashboard.",
 )
 
+origins = [
+    "http://localhost:8081",          # your local dev frontend
+    "https://ai-tribe-fe.vercel.app", # your deployed frontend (replace if name differs)
+]
+
 # Allow the UI (likely a separate frontend) to hit the API without CORS issues.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ai-tribe-hackathon2025-ovw3-csvwrs3lc-amans-projects-31c68103.vercel.app"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
