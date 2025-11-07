@@ -19,7 +19,7 @@ app = FastAPI(
 # Allow the UI (likely a separate frontend) to hit the API without CORS issues.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://ai-tribe-hackathon2025-ovw3-csvwrs3lc-amans-projects-31c68103.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
