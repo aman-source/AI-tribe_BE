@@ -9,6 +9,7 @@ from .models import HealthCheck
 from .routers.analytics import router as analytics_router
 from .routers.ai import router as ai_router
 from .routers.tasks import router as tasks_router
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="Tasks API",
